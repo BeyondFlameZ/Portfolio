@@ -172,7 +172,8 @@ async def place_order(c: CallbackQuery, state: FSMContext):
     await state.clear()
     lines = "\n".join(f"• {p['name']} × {q}" for p, q, _ in logic.cart_lines(cart))
     owner = (f"🛒 <b>Новый заказ #{oid}</b>\n{lines}\nСумма: {logic.money(goods + fee)}"
-             f"{' (доставка ' + logic.money(fee) + ')' if fee else ''}\n{st['name']}, {st['phone']}\n{st['address']}")
+             f"{' (доставка ' + logic.money(fee) + ')' if fee else ''}\n{st['name']}, {st['phone']}\n"
+             f"{'🏃 Самовывоз' if st['address'] == 'самовывоз' else '🚚 Доставка: ' + st['address']}")
     if config.PAYMENT_TOKEN:
         await c.message.edit_text(f"Заказ #{oid} создан. Оплатите по кнопке ниже:")
         await c.bot.send_invoice(c.message.chat.id, title=f"Заказ #{oid}", description=data.SHOP["name"],
@@ -198,4 +199,6 @@ async def paid(m: Message):
     oid = int(m.successful_payment.invoice_payload[6:])
     db.mark_paid(oid)
     await m.answer(f"✅ Оплата получена, заказ #{oid} передан в работу!", reply_markup=kb([[MENU_BTN]]))
-    await notify_owner(m.bot, f"💳 <b>Заказ #{oid} оплачен</b> — {m.successful_payment.total_amount // 100} ₽", m.chat.id)
+    o = db.get_order(oid)
+    extra = f"\n{o['name']}, {o['phone']}\n{'🏃 Самовывоз' if o['address'] == 'самовывоз' else '🚚 ' + o['address']}" if o else ""
+    await notify_owner(m.bot, f"💳 <b>Заказ #{oid} оплачен</b> — {m.successful_payment.total_amount // 100} ₽{extra}", m.chat.id)

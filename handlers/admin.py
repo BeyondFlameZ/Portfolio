@@ -1,5 +1,6 @@
 """Админка владельца: /admin — статистика, записи на сегодня, последние заказы/заявки, выгрузка в Excel (CSV), рассылка."""
 import asyncio
+import json
 from datetime import datetime, timedelta
 
 from aiogram import F, Router
@@ -85,6 +86,25 @@ def days_kb():
     return kb(rows)
 
 
+def order_card(r) -> str:
+    """Карточка заказа для владельца: состав, сумма, оплата, контакты и адрес."""
+    try:
+        items = json.loads(r["items"] or "{}")
+    except ValueError:
+        items = {}
+    lines = ", ".join(f"{p['name']} × {q}" for p, q, _ in logic.cart_lines(items)) or "—"
+    if r["paid"]:
+        pay = "✅ оплачен онлайн"
+    elif config.PAYMENT_TOKEN:
+        pay = "⏳ ждёт оплаты"
+    else:
+        pay = "💵 оплата при получении"
+    addr = r["address"] or "—"
+    where = "🏃 Самовывоз" if addr == "самовывоз" else f"🚚 {addr}"
+    return (f"<b>#{r['id']}</b> · {(r['created'] or '')[:16]} · {logic.money(r['goods'] + r['delivery'])} · {pay}\n"
+            f"{lines}\n{r['name']}, {r['phone']}\n{where}")
+
+
 async def send_long(message, text: str):
     """Telegram режет сообщения на 4096 символах — шлём кусками по строкам."""
     buf = ""
@@ -128,8 +148,7 @@ async def admin_cb(c: CallbackQuery, state: FSMContext):
         await send_long(c.message, f"<b>Записи на {WD[dt.weekday()]} {dt:%d.%m}:</b>\n" + ("\n".join(booking_line(r) for r in rows) or "нет"))
     elif a == "orders":
         rows = db.recent("orders")
-        await c.message.answer("Последние заказы:\n" + ("\n".join(
-            f"#{r['id']} {logic.money(r['goods'] + r['delivery'])} {'✅ оплачен' if r['paid'] else ''} — {r['name']}, {r['phone']}" for r in rows) or "нет"))
+        await send_long(c.message, "<b>Последние заказы:</b>\n\n" + ("\n\n".join(order_card(r) for r in rows) or "нет"))
     elif a == "leads":
         rows = db.recent("leads")
         await c.message.answer("Последние заявки:\n" + ("\n".join(f"#{r['id']} {r['name']}, {r['phone']} — {r['estimate']}" for r in rows) or "нет"))
