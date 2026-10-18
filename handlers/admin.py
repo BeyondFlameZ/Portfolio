@@ -1,6 +1,6 @@
 """Админка владельца: /admin — статистика, записи на сегодня, последние заказы/заявки, выгрузка в Excel (CSV), рассылка."""
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -27,7 +27,8 @@ def is_admin(uid: int) -> bool:
 
 
 def admin_kb():
-    return kb([[("📅 Записи на сегодня", "a:today"), ("🛒 Заказы", "a:orders")],
+    return kb([[("📅 Записи на сегодня", "a:today"), ("📆 Все записи", "a:all")],
+               [("🛒 Заказы", "a:orders")],
                [("🔥 Заявки", "a:leads"), ("📥 Выгрузка в Excel", "a:export")],
                [("📣 Рассылка", "a:bcast")]])
 
@@ -60,6 +61,41 @@ async def admin(m: Message, state: FSMContext):
                    f"Заказов: {s['orders']} на {logic.money(s['revenue'])}\nЗаявок: {s['leads']}", reply_markup=admin_kb())
 
 
+WD = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+
+
+def booking_line(r) -> str:
+    svc, mst = logic.service(r["service"]), logic.master(r["master"])
+    return (f"• {r['start'][11:16]} {svc['name'] if svc else r['service']}, {mst['name'] if mst else r['master']} — "
+            f"{r['name']}, {r['phone']}")
+
+
+def days_kb():
+    """Кнопки на 14 дней вперёд: день недели, число и сколько записей."""
+    today = now_local().date()
+    rows, row = [], []
+    for i in range(14):
+        d = today + timedelta(days=i)
+        n = len(db.bookings_on(f"{d:%Y-%m-%d}"))
+        row.append((f"{WD[d.weekday()]} {d:%d.%m}" + (f" ({n})" if n else ""), f"a:day:{d:%Y-%m-%d}"))
+        if len(row) == 3:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    return kb(rows)
+
+
+async def send_long(message, text: str):
+    """Telegram режет сообщения на 4096 символах — шлём кусками по строкам."""
+    buf = ""
+    for line in text.split("\n"):
+        if len(buf) + len(line) + 1 > 3800:
+            await message.answer(buf); buf = ""
+        buf += line + "\n"
+    if buf.strip():
+        await message.answer(buf)
+
+
 @router.callback_query(F.data.startswith("a:"))
 async def admin_cb(c: CallbackQuery, state: FSMContext):
     if not is_admin(c.from_user.id):
@@ -71,6 +107,25 @@ async def admin_cb(c: CallbackQuery, state: FSMContext):
                                                   f"{logic.master(r['master'])['name'] if logic.master(r['master']) else r['master']} — {r['name']}, {r['phone']}"
                                                   for r in rows) or "нет")
         await c.message.answer(text)
+    elif a == "all":
+        rows = db.bookings_from(f"{now_local():%Y-%m-%d %H:%M}")
+        if not rows:
+            await c.message.answer("Предстоящих записей нет.", reply_markup=days_kb())
+        else:
+            out, day = [f"<b>Все предстоящие записи: {len(rows)}</b>"], None
+            for r in rows:
+                d = r["start"][:10]
+                if d != day:
+                    dt = datetime.strptime(d, "%Y-%m-%d")
+                    out.append(f"\n<b>{WD[dt.weekday()]} {dt:%d.%m}</b>"); day = d
+                out.append(booking_line(r))
+            await send_long(c.message, "\n".join(out))
+            await c.message.answer("Посмотреть конкретный день:", reply_markup=days_kb())
+    elif a.startswith("day:"):
+        d = a[4:]
+        rows = db.bookings_on(d)
+        dt = datetime.strptime(d, "%Y-%m-%d")
+        await send_long(c.message, f"<b>Записи на {WD[dt.weekday()]} {dt:%d.%m}:</b>\n" + ("\n".join(booking_line(r) for r in rows) or "нет"))
     elif a == "orders":
         rows = db.recent("orders")
         await c.message.answer("Последние заказы:\n" + ("\n".join(
