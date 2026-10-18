@@ -28,6 +28,11 @@ def conn() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS leads(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, name TEXT, phone TEXT,
             answers TEXT, estimate TEXT, created TEXT);
         """)
+        try:                                   # миграция старой базы: язык пользователя
+            _conn.execute("ALTER TABLE users ADD COLUMN lang TEXT")
+            _conn.commit()
+        except sqlite3.OperationalError:
+            pass
     return _conn
 
 
@@ -47,8 +52,21 @@ def now_s() -> str:
 # ---------------------------------------------------------------- пользователи
 def touch_user(user_id: int, name: str, username: str | None):
     c = conn()
-    c.execute("INSERT INTO users VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET name=excluded.name, username=excluded.username",
+    c.execute("INSERT INTO users(user_id,name,username,first_seen) VALUES(?,?,?,?) "
+              "ON CONFLICT(user_id) DO UPDATE SET name=excluded.name, username=excluded.username",
               (user_id, name, username or "", now_s()))
+    c.commit()
+
+
+def get_lang(user_id: int) -> str | None:
+    r = conn().execute("SELECT lang FROM users WHERE user_id=?", (user_id,)).fetchone()
+    return r[0] if r and r[0] else None
+
+
+def set_lang(user_id: int, lang: str):
+    c = conn()
+    c.execute("INSERT INTO users(user_id,name,username,first_seen,lang) VALUES(?,?,?,?,?) "
+              "ON CONFLICT(user_id) DO UPDATE SET lang=excluded.lang", (user_id, "", "", now_s(), lang))
     c.commit()
 
 

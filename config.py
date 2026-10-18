@@ -14,3 +14,4 @@ REMIND_BEFORE_MIN = int(os.environ.get("REMIND_BEFORE_MIN", "120"))
 # Чеки 54-ФЗ через ЮKassa («Чеки от ЮKassa» или своя касса): без данных чека такие магазины отклоняют оплату
 RECEIPTS = os.environ.get("RECEIPTS", "false").strip().lower() in ("1", "true", "yes", "on")
 RECEIPT_VAT_CODE = int(os.environ.get("RECEIPT_VAT_CODE", "1"))   # 1 — без НДС (самозанятые, УСН); остальные коды — в доке ЮKassa
+DEFAULT_LANG = os.environ.get("DEFAULT_LANG", "ru").strip().lower() if os.environ.get("DEFAULT_LANG", "ru").strip().lower() in ("ru", "en") else "ru"

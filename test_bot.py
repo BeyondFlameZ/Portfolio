@@ -152,7 +152,7 @@ def test_start_menu_and_order_info():
     x = h(); n = len(x.session.sent)
     x.msg("/start")
     assert any("демо-бот" in t for t in x.texts(n))
-    assert set(x.buttons(n)) == {"m:book", "m:shop", "m:quiz", "m:order"}
+    assert set(x.buttons(n)) == {"m:book", "m:shop", "m:quiz", "m:order", "m:lang"}
     x.cb("m:order")
     assert any("Что могу сделать" in t for t in x.texts(n))
 
@@ -270,6 +270,47 @@ def test_order_statuses_and_clear():
     x.cb("cl:finished!", user=ADMIN)
     assert db.get_order(oid) is None
     assert db.order_counts()["done"] == 0
+
+
+EN_USER = {"id": 222, "is_bot": False, "first_name": "John", "username": "john", "language_code": "en"}
+
+
+def test_english_by_telegram_language_and_switch():
+    x = h()
+    n = len(x.session.sent); x.msg("/start", user=EN_USER)
+    assert any("demo bot" in s for s in x.texts(n, to=222)), x.texts(n)
+    # каталог на английском, цены в долларах
+    n = len(x.session.sent); x.cb("m:book", user=EN_USER)
+    assert any("Razor Barbershop" in s and "Choose a service" in s for s in x.texts(n))
+    assert any("$35" in b for b in [bt.text for m in x.session.sent[n:] if getattr(m, "reply_markup", None) is not None
+                                    and hasattr(m.reply_markup, "inline_keyboard") for row in m.reply_markup.inline_keyboard for bt in row])
+    # квиз: оценка в долларах, уведомление владельцу на английском
+    x.cb("m:quiz", user=EN_USER); x.cb("qa:0:flat", user=EN_USER); x.cb("qa:1:m", user=EN_USER); x.cb("qa:2:cap", user=EN_USER)
+    n = len(x.session.sent); x.cb("qa:3:now", user=EN_USER)
+    assert any("Estimate" in s and "$29,000 – $43,000" in s for s in x.texts(n)), x.texts(n)
+    n = len(x.session.sent); x.msg("+1 555 123 4567", user=EN_USER)
+    assert any("New lead" in s and "+1 (555) 123-4567" in s for s in x.texts(n, to=999)), x.texts(n, to=999)
+    # переключатель: EN → RU, выбор запоминается
+    n = len(x.session.sent); x.cb("m:lang", user=EN_USER)
+    assert db.get_lang(222) == "ru" and any("демо-бот" in s for s in x.texts(n))
+    n = len(x.session.sent); x.msg("/start", user=EN_USER)
+    assert any("демо-бот" in s for s in x.texts(n, to=222))
+    x.cb("m:lang", user=EN_USER)
+    assert db.get_lang(222) == "en"
+
+
+def test_client_status_message_in_client_language():
+    x = h()
+    config.PAYMENT_TOKEN = ""
+    x.cb("m:shop", user=EN_USER); x.cb("si:cap", user=EN_USER); x.cb("sq:cap:1", user=EN_USER); x.cb("sh:checkout", user=EN_USER)
+    x.msg("John", user=EN_USER); x.msg("+1 555 000 1111", user=EN_USER)
+    n = len(x.session.sent); x.cb("sd:0", user=EN_USER)
+    assert any("Check your order" in s and "pickup" in s for s in x.texts(n)), x.texts(n)
+    x.cb("sh:confirm", user=EN_USER)
+    oid = db.orders_by("recent", 1)[0]["id"]
+    n = len(x.session.sent); x.cb(f"os:{oid}:done", user=ADMIN)          # админ — по-русски
+    assert any(f"Order #{oid} is complete" in s for s in x.texts(n, to=222)), x.texts(n, to=222)
+    assert any("✅ Выполнен" in s for s in x.texts(n, to=999))
 
 
 def test_phone_format_and_local_time():

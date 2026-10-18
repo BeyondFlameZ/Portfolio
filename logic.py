@@ -3,21 +3,26 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-import data
+from i18n import D, en, tr
 
-WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+WD_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+WD_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def wd(d: datetime) -> str:
+    return (WD_EN if en() else WD_RU)[d.weekday()]
 
 
 def service(sid: str) -> dict | None:
-    return next((s for s in data.SERVICES if s["id"] == sid), None)
+    return next((s for s in D().SERVICES if s["id"] == sid), None)
 
 
 def master(mid: str) -> dict | None:
-    return next((m for m in data.MASTERS if m["id"] == mid), None)
+    return next((m for m in D().MASTERS if m["id"] == mid), None)
 
 
 def masters_for(sid: str) -> list[dict]:
-    return [m for m in data.MASTERS if sid in m["services"]]
+    return [m for m in D().MASTERS if sid in m["services"]]
 
 
 def free_slots(day: datetime, mid: str, dur_min: int, busy: list[tuple[datetime, datetime]], now: datetime) -> list[datetime]:
@@ -25,7 +30,7 @@ def free_slots(day: datetime, mid: str, dur_min: int, busy: list[tuple[datetime,
     m = master(mid)
     if m is None or day.weekday() in m["days_off"]:
         return []
-    s = data.SALON
+    s = D().SALON
     start = day.replace(hour=s["open_hour"], minute=0, second=0, microsecond=0)
     close = day.replace(hour=s["close_hour"], minute=0, second=0, microsecond=0)
     earliest = now + timedelta(minutes=s["min_lead_min"])
@@ -41,20 +46,20 @@ def free_slots(day: datetime, mid: str, dur_min: int, busy: list[tuple[datetime,
 
 def booking_days(now: datetime) -> list[datetime]:
     base = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return [base + timedelta(days=k) for k in range(data.SALON["days_ahead"])]
+    return [base + timedelta(days=k) for k in range(D().SALON["days_ahead"])]
 
 
 def day_label(d: datetime, now: datetime) -> str:
     if d.date() == now.date():
-        return f"Сегодня {d:%d.%m}"
+        return f"{tr('Сегодня', 'Today')} {d:%d.%m}"
     if d.date() == (now + timedelta(days=1)).date():
-        return f"Завтра {d:%d.%m}"
-    return f"{WD[d.weekday()]} {d:%d.%m}"
+        return f"{tr('Завтра', 'Tomorrow')} {d:%d.%m}"
+    return f"{wd(d)} {d:%d.%m}"
 
 
 # ---------------------------------------------------------------- магазин
 def product(pid: str) -> dict | None:
-    return next((p for p in data.PRODUCTS if p["id"] == pid), None)
+    return next((p for p in D().PRODUCTS if p["id"] == pid), None)
 
 
 def cart_lines(cart: dict[str, int]) -> list[tuple[dict, int, int]]:
@@ -71,30 +76,30 @@ def cart_total(cart: dict[str, int], delivery: bool = False) -> tuple[int, int]:
     """-> (сумма товаров, стоимость доставки)."""
     goods = sum(s for _, _, s in cart_lines(cart))
     fee = 0
-    if delivery and goods < data.SHOP["free_delivery_from"]:
-        fee = data.SHOP["delivery_price"]
+    if delivery and goods < D().SHOP["free_delivery_from"]:
+        fee = D().SHOP["delivery_price"]
     return goods, fee
 
 
 def cart_text(cart: dict[str, int], delivery: bool | None = None) -> str:
     lines = cart_lines(cart)
     if not lines:
-        return "Корзина пуста."
-    rows = [f"• {p['name']} × {q} = {s} ₽" for p, q, s in lines]
+        return tr("Корзина пуста.", "Your cart is empty.")
+    rows = [f"• {p['name']} × {q} = {money(s)}" for p, q, s in lines]
     goods, fee = cart_total(cart, bool(delivery))
-    rows.append(f"\nТовары: {goods} ₽")
+    rows.append(f"\n{tr('Товары', 'Items')}: {money(goods)}")
     if delivery:
-        rows.append(f"Доставка: {fee} ₽" if fee else "Доставка: бесплатно")
-        rows.append(f"Итого: {goods + fee} ₽")
-    elif delivery is None and goods < data.SHOP["free_delivery_from"]:
-        rows.append(f"Бесплатная доставка от {data.SHOP['free_delivery_from']} ₽")
+        rows.append(f"{tr('Доставка', 'Delivery')}: {money(fee)}" if fee else tr("Доставка: бесплатно", "Delivery: free"))
+        rows.append(f"{tr('Итого', 'Total')}: {money(goods + fee)}")
+    elif delivery is None and goods < D().SHOP["free_delivery_from"]:
+        rows.append(tr("Бесплатная доставка от ", "Free delivery from ") + money(D().SHOP['free_delivery_from']))
     return "\n".join(rows)
 
 
 # ---------------------------------------------------------------- квиз
 def quiz_estimate(answers: dict[str, str]) -> tuple[int, int] | None:
     """Ориентир цены (от, до) по ответам: коэфф. объекта × площадь × цена за м² ±20%."""
-    q = {x["id"]: {o[0]: o[2] for o in x["options"]} for x in data.QUIZ["questions"]}
+    q = {x["id"]: {o[0]: o[2] for o in x["options"]} for x in D().QUIZ["questions"]}
     try:
         base = q["obj"][answers["obj"]] * q["area"][answers["area"]] * q["kind"][answers["kind"]]
     except KeyError:
@@ -103,7 +108,7 @@ def quiz_estimate(answers: dict[str, str]) -> tuple[int, int] | None:
 
 
 def quiz_option_label(qid: str, oid: str) -> str:
-    for x in data.QUIZ["questions"]:
+    for x in D().QUIZ["questions"]:
         if x["id"] == qid:
             for o in x["options"]:
                 if o[0] == oid:
@@ -112,6 +117,8 @@ def quiz_option_label(qid: str, oid: str) -> str:
 
 
 def money(x: int) -> str:
+    if en():
+        return f"${x:,}"
     return f"{x:,}".replace(",", " ") + " ₽"
 
 
