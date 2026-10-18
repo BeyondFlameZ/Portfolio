@@ -205,8 +205,12 @@ def test_shop_flow_cash():
     assert any("Проверьте заказ" in s and "Доставка: 200 ₽" in s and "Итого: 740 ₽" in s for s in x.texts(n)), x.texts(n)
     n = len(x.session.sent); x.cb("sh:confirm")
     assert any("Заказ #" in s and "принят" in s for s in x.texts(n))
-    assert any("Новый заказ" in s and "740" in s for s in x.texts(n, to=999))
+    assert any("Новый заказ" in s and "740" in s and "Доставка: ул. Ленина, 5, кв 3" in s for s in x.texts(n, to=999))
     assert db.cart(111) == {}
+    # в админке у заказа видны состав, адрес и способ оплаты
+    n = len(x.session.sent); x.cb("a:orders", user=ADMIN)
+    t = "\n".join(x.texts(n))
+    assert "ул. Ленина, 5, кв 3" in t and "Капучино × 1" in t and "Чизкейк × 1" in t and "оплата при получении" in t, t
 
 
 def test_shop_flow_online_payment():
@@ -226,6 +230,9 @@ def test_shop_flow_online_payment():
         x.msg(payment={"currency": "RUB", "total_amount": 89000, "invoice_payload": inv[0].payload,
                        "telegram_payment_charge_id": "t", "provider_payment_charge_id": "p"})
         assert db.get_order(oid)["paid"] == 1
+        assert any("оплачен" in s and "Самовывоз" in s and "Пётр" in s for s in x.texts(0, to=999))
+        n2 = len(x.session.sent); x.cb("a:orders", user=ADMIN)
+        assert any(f"#{oid}" in s and "оплачен онлайн" in s for s in x.texts(n2))
         n = len(x.session.sent); x.precheckout("order:999999")
         assert not [m for m in x.session.sent[n:] if isinstance(m, AnswerPreCheckoutQuery)][0].ok
     finally:
