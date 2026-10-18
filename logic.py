@@ -113,3 +113,28 @@ def quiz_option_label(qid: str, oid: str) -> str:
 
 def money(x: int) -> str:
     return f"{x:,}".replace(",", " ") + " ₽"
+
+
+def receipt_phone(phone: str) -> str:
+    """Телефон для чека ЮKassa: только цифры, российский номер с 7 в начале."""
+    d = "".join(ch for ch in phone or "" if ch.isdigit())
+    if len(d) == 11 and d[0] == "8":
+        d = "7" + d[1:]
+    elif len(d) == 10:
+        d = "7" + d
+    return d
+
+
+def yookassa_receipt(cart: dict[str, int], delivery_fee: int, phone: str, vat_code: int = 1) -> dict:
+    """
+    provider_data для sendInvoice: чек 54-ФЗ в формате ЮKassa (объект receipt из create_payment).
+    Сумма позиций обязана совпадать с суммой счёта, поэтому доставка — отдельной позицией-услугой.
+    """
+    def item(name, qty, price, subject):
+        return {"description": name[:128], "quantity": f"{qty:.2f}",
+                "amount": {"value": f"{price:.2f}", "currency": "RUB"},   # цена за единицу
+                "vat_code": vat_code, "payment_mode": "full_payment", "payment_subject": subject}
+    items = [item(p["name"], q, p["price"], "commodity") for p, q, _ in cart_lines(cart)]
+    if delivery_fee:
+        items.append(item("Доставка", 1, delivery_fee, "service"))
+    return {"receipt": {"customer": {"phone": receipt_phone(phone)}, "items": items}}

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import config
 
@@ -40,7 +40,8 @@ def reset_for_tests(path: str):
 
 
 def now_s() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds")
+    """Время создания записи — местное время заведения (TZ_OFFSET_HOURS), а не UTC."""
+    return (datetime.now(timezone.utc) + timedelta(hours=config.TZ_OFFSET)).strftime("%Y-%m-%d %H:%M")
 
 
 # ---------------------------------------------------------------- пользователи

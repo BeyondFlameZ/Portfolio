@@ -239,6 +239,33 @@ def test_shop_flow_online_payment():
         config.PAYMENT_TOKEN = ""
 
 
+def test_phone_format_and_local_time():
+    assert common.fmt_phone("79113376594") == "+7 911 337-65-94"
+    assert common.fmt_phone("+7 (911) 337-65-94") == "+7 911 337-65-94"
+    assert common.fmt_phone("89113376594") == "+7 911 337-65-94"
+    assert common.fmt_phone("380501234567") == "+380501234567"
+    assert db.now_s()[:16] == f"{common.now_local():%Y-%m-%d %H:%M}"
+
+
+def test_receipt_for_yookassa():
+    x = h()
+    config.PAYMENT_TOKEN = "TEST:123"; config.RECEIPTS = True
+    try:
+        x.cb("m:shop"); x.cb("si:cap"); x.cb("sq:cap:1"); x.cb("sq:cap:1"); x.cb("sh:checkout")
+        x.msg("Ольга"); x.msg("8 (900) 111-22-33"); x.cb("sd:1"); x.msg("пр. Мира, 10")
+        n = len(x.session.sent); x.cb("sh:confirm")
+        inv = [m for m in x.session.sent[n:] if isinstance(m, SendInvoice)][0]
+        import json as _j
+        r = _j.loads(inv.provider_data)["receipt"]
+        assert r["customer"]["phone"] == "79001112233"
+        total_items = sum(float(i["amount"]["value"]) * float(i["quantity"]) for i in r["items"])
+        assert abs(total_items * 100 - sum(p.amount for p in inv.prices)) < 1, (total_items, inv.prices)
+        assert any(i["description"] == "Доставка" and i["payment_subject"] == "service" for i in r["items"])
+        assert all(i["vat_code"] == 1 and i["amount"]["currency"] == "RUB" for i in r["items"])
+    finally:
+        config.PAYMENT_TOKEN = ""; config.RECEIPTS = False
+
+
 def test_quiz_flow():
     x = h()
     x.cb("m:quiz"); x.cb("qa:0:flat"); x.cb("qa:1:m")
@@ -257,7 +284,7 @@ def test_admin_panel_export_and_broadcast():
     n = len(x.session.sent); x.msg("/admin")
     assert any("только владельцу" in s for s in x.texts(n))
     n = len(x.session.sent); x.msg("/admin", user=ADMIN)
-    assert any("Админка" in s and "Заказов: 2" in s for s in x.texts(n)), x.texts(n)
+    assert any("Админка" in s and f"Заказов: {db.stats()['orders']}" in s for s in x.texts(n)), x.texts(n)
     n = len(x.session.sent); x.cb("a:export", user=ADMIN)
     docs = [m for m in x.session.sent[n:] if isinstance(m, SendDocument)]
     assert len(docs) == 4
