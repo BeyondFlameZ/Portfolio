@@ -293,6 +293,61 @@ def test_reminders_sent_once():
     assert not any(r["id"] == bid for r in due)
 
 
+class SplitHarness(Harness):
+    """Раздельный режим: клиентский бот + служебный бот владельца со своей сессией."""
+    def __init__(self):
+        super().__init__()
+        self.dp = botmod.build_dispatcher(split=True)
+        self.asession = FakeSession()
+        self.abot = Bot("456:DEF", session=self.asession, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        self.adp = botmod.build_admin_dispatcher()
+        common.CLIENT_BOT, common.ADMIN_BOT = self.bot, self.abot
+
+    def amsg(self, text, user=ADMIN):
+        m = {"message_id": self.uid + 1, "date": 0, "chat": {"id": user["id"], "type": "private"}, "from": user, "text": text}
+        if text.startswith("/"):
+            m["entities"] = [{"type": "bot_command", "offset": 0, "length": len(text.split()[0])}]
+        self.uid += 1
+        return run(self.adp.feed_update(self.abot, Update.model_validate({"update_id": self.uid, "message": m}, context={"bot": self.abot})))
+
+    def acb(self, data_, user=ADMIN):
+        q = {"id": str(self.uid), "from": user, "chat_instance": "x", "data": data_,
+             "message": {"message_id": 5, "date": 0, "chat": {"id": user["id"], "type": "private"}, "text": "x"}}
+        self.uid += 1
+        return run(self.adp.feed_update(self.abot, Update.model_validate({"update_id": self.uid, "callback_query": q}, context={"bot": self.abot})))
+
+    def atexts(self, since=0, to=None):
+        return [m.text for m in self.asession.sent[since:] if isinstance(m, (SendMessage, EditMessageText))
+                and (to is None or getattr(m, "chat_id", to) == to)]
+
+
+def test_split_admin_bot():
+    x = SplitHarness()
+    try:
+        # заявка в клиентском боте → уведомление владельцу приходит в служебный бот, а не в клиентский
+        x.cb("m:quiz"); x.cb("qa:0:flat"); x.cb("qa:1:m"); x.cb("qa:2:cap"); x.cb("qa:3:now")
+        n, na = len(x.session.sent), len(x.asession.sent)
+        x.msg("+7 911 222 33 44")
+        assert any("Новая заявка" in s for s in x.atexts(na, to=999)), (x.atexts(na), x.texts(n))
+        assert not any("Новая заявка" in s for s in x.texts(n, to=999)), "уведомление ушло в клиентский бот"
+        assert any("служебный бот" in s for s in x.texts(n, to=111)), "нет демо-превью"
+        # /admin в клиентском боте — подсказка, админки нет
+        n = len(x.session.sent); x.msg("/admin", user=ADMIN)
+        assert any("служебном боте" in s for s in x.texts(n)) and not any("Админка</b>" in s for s in x.texts(n))
+        # служебный бот: чужому закрыт, владельцу /start открывает админку
+        na = len(x.asession.sent); x.amsg("/start", user=USER)
+        assert any("Доступ закрыт" in s for s in x.atexts(na))
+        na = len(x.asession.sent); x.amsg("/start")
+        assert any("Админка" in s for s in x.atexts(na)), x.atexts(na)
+        # рассылка из служебного бота уходит клиентам через клиентский бот
+        x.acb("a:bcast"); x.amsg("Скидка 10% сегодня")
+        n, na = len(x.session.sent), len(x.asession.sent); x.acb("bc:yes")
+        assert any(isinstance(m, SendMessage) and m.chat_id == 111 and "Скидка" in m.text for m in x.session.sent[n:])
+        assert any("доставлено" in s for s in x.atexts(na))
+    finally:
+        common.CLIENT_BOT = common.ADMIN_BOT = None
+
+
 if __name__ == "__main__":
     asyncio.set_event_loop(asyncio.new_event_loop())
     fns = [v for k, v in globals().items() if k.startswith("test_")]

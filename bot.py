@@ -15,14 +15,33 @@ import config
 import db
 import logic
 from handlers import admin, booking, fallback, menu, quiz, shop
+from handlers import common
 from handlers.common import log, now_local
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
-def build_dispatcher() -> Dispatcher:
+def _detached(*routers):
+    """Роутеры aiogram цепляются к одному диспетчеру. Отвязываем перед сборкой, чтобы диспетчеры можно было пересоздавать (тесты)."""
+    for r in routers:
+        r._parent_router = None
+    return routers
+
+
+def build_dispatcher(split: bool = False) -> Dispatcher:
+    """Клиентский бот. split=True — админка вынесена в служебного бота, здесь только подсказка на /admin."""
     dp = Dispatcher()
-    dp.include_routers(menu.router, admin.router, booking.router, shop.router, quiz.router, fallback.router)
+    if split:
+        dp.include_routers(*_detached(menu.router, menu.admin_hint_router, booking.router, shop.router, quiz.router, fallback.router))
+    else:
+        dp.include_routers(*_detached(menu.router, admin.router, booking.router, shop.router, quiz.router, fallback.router))
+    return dp
+
+
+def build_admin_dispatcher() -> Dispatcher:
+    """Служебный бот владельца: /start → админка, сюда же приходят уведомления."""
+    dp = Dispatcher()
+    dp.include_routers(*_detached(admin.admin_bot_router, admin.router))
     return dp
 
 
@@ -48,13 +67,26 @@ async def reminders(bot: Bot):
 async def main():
     if not config.BOT_TOKEN:
         raise SystemExit("Нет BOT_TOKEN — добавь переменную на Railway")
-    bot = Bot(config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    props = DefaultBotProperties(parse_mode=ParseMode.HTML)
+    bot = Bot(config.BOT_TOKEN, default=props)
     db.conn()
-    await bot.set_my_commands([BotCommand(command="start", description="Главное меню"),
-                               BotCommand(command="admin", description="Админка (для владельца)"),
-                               BotCommand(command="cancel", description="Отменить текущее действие")])
+    split = bool(config.ADMIN_BOT_TOKEN)
     asyncio.create_task(reminders(bot))
-    await build_dispatcher().start_polling(bot)
+    if not split:
+        await bot.set_my_commands([BotCommand(command="start", description="Главное меню"),
+                                   BotCommand(command="admin", description="Админка (для владельца)"),
+                                   BotCommand(command="cancel", description="Отменить текущее действие")])
+        await build_dispatcher().start_polling(bot)
+        return
+    admin_bot = Bot(config.ADMIN_BOT_TOKEN, default=props)
+    common.CLIENT_BOT, common.ADMIN_BOT = bot, admin_bot
+    await bot.set_my_commands([BotCommand(command="start", description="Главное меню"),
+                               BotCommand(command="cancel", description="Отменить текущее действие")])
+    await admin_bot.set_my_commands([BotCommand(command="start", description="Админка"),
+                                     BotCommand(command="cancel", description="Отменить рассылку")])
+    log.info("Раздельный режим: клиентский бот + служебный бот владельца")
+    await asyncio.gather(build_dispatcher(split=True).start_polling(bot, handle_signals=False),
+                         build_admin_dispatcher().start_polling(admin_bot, handle_signals=False))
 
 
 if __name__ == "__main__":

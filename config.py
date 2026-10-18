@@ -2,6 +2,7 @@
 import os
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+ADMIN_BOT_TOKEN = os.environ.get("ADMIN_BOT_TOKEN", "")   # второй бот только для владельца: уведомления + /admin. Пусто — всё в одном боте
 ADMIN_IDS = {int(x) for x in os.environ.get("ADMIN_IDS", "").replace(" ", "").split(",") if x}
 DB_PATH = os.environ.get("DB_PATH", "/data/showcase.db")
 BRAND = os.environ.get("BRAND", "Jack Bots")
