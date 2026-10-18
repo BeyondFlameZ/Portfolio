@@ -101,7 +101,12 @@ def order_card(r) -> str:
         pay = "💵 оплата при получении"
     addr = r["address"] or "—"
     where = "🏃 Самовывоз" if addr == "самовывоз" else f"🚚 {addr}"
-    return (f"<b>#{r['id']}</b> · {(r['created'] or '')[:16]} · {logic.money(r['goods'] + r['delivery'])} · {pay}\n"
+    cr = (r["created"] or "").replace("T", " ")
+    try:
+        cr = datetime.strptime(cr[:16], "%Y-%m-%d %H:%M").strftime("%d.%m %H:%M")
+    except ValueError:
+        pass
+    return (f"<b>#{r['id']}</b> · {cr} · {logic.money(r['goods'] + r['delivery'])} · {pay}\n"
             f"{lines}\n{r['name']}, {r['phone']}\n{where}")
 
 

@@ -1,4 +1,5 @@
 """Магазин: категории → товар (± в корзину) → корзина → оформление (имя, телефон, доставка/самовывоз, адрес) → оплата."""
+import json
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -8,7 +9,7 @@ import config
 import data
 import db
 import logic
-from handlers.common import MENU_BTN, kb, notify_owner, parse_phone, phone_kb
+from handlers.common import fmt_phone, MENU_BTN, kb, notify_owner, parse_phone, phone_kb
 
 router = Router()
 
@@ -121,6 +122,7 @@ async def co_name(m: Message, state: FSMContext):
 @router.message(Checkout.phone)
 async def co_phone(m: Message, state: FSMContext):
     phone = m.contact.phone_number if m.contact else parse_phone(m.text)
+    phone = fmt_phone(phone) if phone else None
     if not phone:
         return await m.answer("Не похоже на номер. Нажмите кнопку или напишите, например +7 999 123-45-67", reply_markup=phone_kb())
     await state.update_data(phone=phone)
@@ -179,7 +181,9 @@ async def place_order(c: CallbackQuery, state: FSMContext):
         await c.bot.send_invoice(c.message.chat.id, title=f"Заказ #{oid}", description=data.SHOP["name"],
                                  payload=f"order:{oid}", provider_token=config.PAYMENT_TOKEN, currency="RUB",
                                  prices=[LabeledPrice(label="Товары", amount=goods * 100)] +
-                                        ([LabeledPrice(label="Доставка", amount=fee * 100)] if fee else []))
+                                        ([LabeledPrice(label="Доставка", amount=fee * 100)] if fee else []),
+                                 provider_data=json.dumps(logic.yookassa_receipt(cart, fee, st["phone"], config.RECEIPT_VAT_CODE),
+                                                          ensure_ascii=False) if config.RECEIPTS else None)
         await notify_owner(c.bot, owner + "\n⏳ Ждёт оплаты", c.message.chat.id)
     else:
         await c.message.edit_text(f"✅ Заказ #{oid} принят! Скоро свяжемся для подтверждения.\nСумма: {logic.money(goods + fee)}",

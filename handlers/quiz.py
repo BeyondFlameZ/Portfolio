@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 import data
 import db
 import logic
-from handlers.common import MENU_BTN, kb, notify_owner, parse_phone, phone_kb
+from handlers.common import fmt_phone, MENU_BTN, kb, notify_owner, parse_phone, phone_kb
 
 router = Router()
 QS = data.QUIZ["questions"]
@@ -68,6 +68,7 @@ async def quiz_answer(c: CallbackQuery, state: FSMContext):
 @router.message(Quiz.phone)
 async def quiz_phone(m: Message, state: FSMContext):
     phone = m.contact.phone_number if m.contact else parse_phone(m.text)
+    phone = fmt_phone(phone) if phone else None
     if not phone:
         return await m.answer("Не похоже на номер. Нажмите кнопку или напишите, например +7 999 123-45-67", reply_markup=phone_kb())
     st = await state.get_data()

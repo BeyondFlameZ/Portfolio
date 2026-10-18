@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 import data
 import db
 import logic
-from handlers.common import MENU_BTN, chunks, kb, main_menu, notify_owner, now_local, parse_phone, phone_kb
+from handlers.common import fmt_phone, MENU_BTN, chunks, kb, main_menu, notify_owner, now_local, parse_phone, phone_kb
 
 router = Router()
 
@@ -90,6 +90,7 @@ async def pick_time(c: CallbackQuery, state: FSMContext):
 @router.message(Book.phone)
 async def got_phone(m: Message, state: FSMContext):
     phone = m.contact.phone_number if m.contact else parse_phone(m.text)
+    phone = fmt_phone(phone) if phone else None
     if not phone:
         return await m.answer("Не похоже на номер. Нажмите кнопку ниже или напишите номер, например +7 999 123-45-67",
                               reply_markup=phone_kb())

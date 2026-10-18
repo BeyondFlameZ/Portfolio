@@ -50,6 +50,16 @@ def phone_kb() -> ReplyKeyboardMarkup:
 PHONE_RE = re.compile(r"[\d+()\-\s]{10,20}")
 
 
+def fmt_phone(p: str | None) -> str:
+    """Телефон в читаемом виде: +7 911 337-65-94 (российские номера), остальные — как есть с плюсом."""
+    d = "".join(ch for ch in p or "" if ch.isdigit())
+    if len(d) == 11 and d[0] in "78":
+        return f"+7 {d[1:4]} {d[4:7]}-{d[7:9]}-{d[9:11]}"
+    if len(d) == 10 and d[0] == "9":
+        return f"+7 {d[0:3]} {d[3:6]}-{d[6:8]}-{d[8:10]}"
+    return ("+" + d) if d else (p or "")
+
+
 def parse_phone(text: str | None) -> str | None:
     if not text:
         return None
