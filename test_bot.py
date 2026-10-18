@@ -208,7 +208,7 @@ def test_shop_flow_cash():
     assert any("Новый заказ" in s and "740" in s and "Доставка: ул. Ленина, 5, кв 3" in s for s in x.texts(n, to=999))
     assert db.cart(111) == {}
     # в админке у заказа видны состав, адрес и способ оплаты
-    n = len(x.session.sent); x.cb("a:orders", user=ADMIN)
+    n = len(x.session.sent); x.cb("a:o_recent", user=ADMIN)
     t = "\n".join(x.texts(n))
     assert "ул. Ленина, 5, кв 3" in t and "Капучино × 1" in t and "Чизкейк × 1" in t and "оплата при получении" in t, t
 
@@ -231,12 +231,45 @@ def test_shop_flow_online_payment():
                        "telegram_payment_charge_id": "t", "provider_payment_charge_id": "p"})
         assert db.get_order(oid)["paid"] == 1
         assert any("оплачен" in s and "Самовывоз" in s and "Пётр" in s for s in x.texts(0, to=999))
-        n2 = len(x.session.sent); x.cb("a:orders", user=ADMIN)
+        n2 = len(x.session.sent); x.cb("a:o_recent", user=ADMIN)
         assert any(f"#{oid}" in s and "оплачен онлайн" in s for s in x.texts(n2))
         n = len(x.session.sent); x.precheckout("order:999999")
         assert not [m for m in x.session.sent[n:] if isinstance(m, AnswerPreCheckoutQuery)][0].ok
     finally:
         config.PAYMENT_TOKEN = ""
+
+
+def test_order_statuses_and_clear():
+    x = h()
+    config.PAYMENT_TOKEN = ""
+    x.cb("m:shop"); x.cb("si:brn"); x.cb("sq:brn:1"); x.cb("sh:checkout")
+    x.msg("Нина"); x.msg("+7 900 555-44-33"); x.cb("sd:0")
+    n = len(x.session.sent); x.cb("sh:confirm")
+    oid = db.orders_by("recent", 1)[0]["id"]
+    # уведомление владельцу приходит с кнопками статуса
+    notes = [m for m in x.session.sent[n:] if isinstance(m, SendMessage) and m.chat_id == 999 and "Новый заказ" in m.text]
+    assert notes and any(b.callback_data == f"os:{oid}:done" for row in notes[0].reply_markup.inline_keyboard for b in row)
+    # активные: заказ там, с кнопками
+    n = len(x.session.sent); x.cb("a:o_active", user=ADMIN)
+    assert any(f"#{oid}" in s and "🆕 Новый" in s for s in x.texts(n))
+    # в работу → клиенту уходит сообщение
+    n = len(x.session.sent); x.cb(f"os:{oid}:work", user=ADMIN)
+    assert db.get_order(oid)["status"] == "work"
+    assert any(f"заказ #{oid}" in s.lower() and "готовится" in s for s in x.texts(n, to=111))
+    # выполнен → уходит из активных, появляется в выполненных
+    x.cb(f"os:{oid}:done", user=ADMIN)
+    assert all(r["id"] != oid for r in db.orders_by("active"))
+    n = len(x.session.sent); x.cb("a:o_done", user=ADMIN)
+    assert any(f"#{oid}" in s and "✅ Выполнен" in s for s in x.texts(n))
+    # не-админ статус менять не может
+    n = len(x.session.sent); x.cb(f"os:{oid}:cancel")
+    assert "Только для владельца" in x.alerts(n) and db.get_order(oid)["status"] == "done"
+    # очистка: сначала подтверждение, потом удаление выполненных
+    n = len(x.session.sent); x.cb("cl:finished", user=ADMIN)
+    assert db.get_order(oid) is not None and any("Отменить будет нельзя" in s for s in x.texts(n))
+    x.cb("cl:finished!", user=ADMIN)
+    assert db.get_order(oid) is None
+    assert db.order_counts()["done"] == 0
 
 
 def test_phone_format_and_local_time():

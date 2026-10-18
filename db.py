@@ -148,11 +148,59 @@ def add_order(user_id, items: dict, goods: int, delivery: int, name, phone, addr
 def mark_paid(order_id: int):
     c = conn()
     with c:
-        c.execute("UPDATE orders SET paid=1, status='paid' WHERE id=?", (order_id,))
+        c.execute("UPDATE orders SET paid=1 WHERE id=?", (order_id,))
 
 
 def get_order(order_id: int) -> sqlite3.Row | None:
     return conn().execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+
+
+# Статусы заказа: new — новый, work — в работе (готовится/везут), done — выполнен, cancel — отменён.
+# 'paid' — старое значение из прежней версии, считается новым.
+ACTIVE = ("new", "work", "paid")
+
+
+def set_order_status(order_id: int, status: str) -> bool:
+    assert status in ("new", "work", "done", "cancel")
+    c = conn()
+    with c:
+        cur = c.execute("UPDATE orders SET status=? WHERE id=?", (status, order_id))
+    return cur.rowcount > 0
+
+
+def orders_by(kind: str, n: int = 20) -> list[sqlite3.Row]:
+    """kind: active — новые и в работе (старые сверху, в порядке очереди); done — выполненные и отменённые; recent — все последние."""
+    c = conn()
+    if kind == "active":
+        return c.execute(f"SELECT * FROM orders WHERE status IN ({','.join('?' * len(ACTIVE))}) ORDER BY id LIMIT ?", (*ACTIVE, n)).fetchall()
+    if kind == "done":
+        return c.execute("SELECT * FROM orders WHERE status IN ('done','cancel') ORDER BY id DESC LIMIT ?", (n,)).fetchall()
+    return c.execute("SELECT * FROM orders ORDER BY id DESC LIMIT ?", (n,)).fetchall()
+
+
+def order_counts() -> dict:
+    c = conn()
+    one = lambda q, *a: c.execute(q, a).fetchone()[0]
+    return {"active": one(f"SELECT COUNT(*) FROM orders WHERE status IN ({','.join('?' * len(ACTIVE))})", *ACTIVE),
+            "done": one("SELECT COUNT(*) FROM orders WHERE status IN ('done','cancel')"),
+            "all": one("SELECT COUNT(*) FROM orders")}
+
+
+def clear_history(what: str) -> int:
+    """
+    finished — удалить выполненные и отменённые заказы;
+    all — стереть все заказы, записи, заявки и корзины (пользователи остаются для рассылки).
+    Возвращает, сколько строк удалено.
+    """
+    c = conn()
+    with c:
+        if what == "finished":
+            return c.execute("DELETE FROM orders WHERE status IN ('done','cancel')").rowcount
+        n = 0
+        for t in ("orders", "bookings", "leads", "carts"):
+            n += c.execute(f"DELETE FROM {t}").rowcount
+        c.execute("DELETE FROM sqlite_sequence WHERE name IN ('orders','bookings','leads')")   # нумерация снова с #1
+        return n
 
 
 def recent(table: str, n: int = 10) -> list[sqlite3.Row]:
