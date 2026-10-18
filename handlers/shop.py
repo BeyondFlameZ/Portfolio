@@ -161,6 +161,11 @@ async def confirm(msg: Message, state: FSMContext, user_id: int):
     await msg.answer(text, reply_markup=kb([[(pay, "sh:confirm")], [("✏️ Изменить корзину", "sh:cart")]]))
 
 
+def _status_kb(oid: int):
+    return kb([[("🚚 В работу", f"os:{oid}:work"), ("✅ Выполнен", f"os:{oid}:done")],
+               [("✖️ Отменить", f"os:{oid}:cancel")]])
+
+
 @router.callback_query(F.data == "sh:confirm")
 async def place_order(c: CallbackQuery, state: FSMContext):
     st = await state.get_data()
@@ -184,11 +189,11 @@ async def place_order(c: CallbackQuery, state: FSMContext):
                                         ([LabeledPrice(label="Доставка", amount=fee * 100)] if fee else []),
                                  provider_data=json.dumps(logic.yookassa_receipt(cart, fee, st["phone"], config.RECEIPT_VAT_CODE),
                                                           ensure_ascii=False) if config.RECEIPTS else None)
-        await notify_owner(c.bot, owner + "\n⏳ Ждёт оплаты", c.message.chat.id)
+        await notify_owner(c.bot, owner + "\n⏳ Ждёт оплаты", c.message.chat.id, markup=_status_kb(oid))
     else:
         await c.message.edit_text(f"✅ Заказ #{oid} принят! Скоро свяжемся для подтверждения.\nСумма: {logic.money(goods + fee)}",
                                   reply_markup=kb([[MENU_BTN]]))
-        await notify_owner(c.bot, owner + "\n💵 Оплата при получении", c.message.chat.id)
+        await notify_owner(c.bot, owner + "\n💵 Оплата при получении", c.message.chat.id, markup=_status_kb(oid))
     await c.answer()
 
 

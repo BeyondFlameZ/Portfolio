@@ -29,7 +29,7 @@ def is_admin(uid: int) -> bool:
 
 def admin_kb():
     return kb([[("📅 Записи на сегодня", "a:today"), ("📆 Все записи", "a:all")],
-               [("🛒 Заказы", "a:orders")],
+               [("🛒 Заказы", "a:orders"), ("🧹 Очистить историю", "a:clear")],
                [("🔥 Заявки", "a:leads"), ("📥 Выгрузка в Excel", "a:export")],
                [("📣 Рассылка", "a:bcast")]])
 
@@ -86,6 +86,28 @@ def days_kb():
     return kb(rows)
 
 
+STATUS = {"new": "🆕 Новый", "paid": "🆕 Новый", "work": "🚚 В работе", "done": "✅ Выполнен", "cancel": "✖️ Отменён"}
+CLIENT_MSG = {"work": "🚚 Ваш заказ #{id} готовится и скоро будет у вас!",
+              "done": "✅ Заказ #{id} выполнен. Спасибо, что выбрали нас!",
+              "cancel": "Заказ #{id} отменён. Если это ошибка — напишите нам."}
+
+
+def order_kb(r):
+    """Кнопки смены статуса под карточкой заказа."""
+    oid, st = r["id"], r["status"]
+    if st in ("done", "cancel"):
+        return kb([[("↩️ Вернуть в работу", f"os:{oid}:work")]])
+    row = [] if st == "work" else [("🚚 В работу", f"os:{oid}:work")]
+    row.append(("✅ Выполнен", f"os:{oid}:done"))
+    return kb([row, [("✖️ Отменить", f"os:{oid}:cancel")]])
+
+
+def orders_menu():
+    n = db.order_counts()
+    return kb([[(f"🆕 Активные ({n['active']})", "a:o_active"), (f"✅ Выполненные ({n['done']})", "a:o_done")],
+               [("📋 Последние 10", "a:o_recent")]])
+
+
 def order_card(r) -> str:
     """Карточка заказа для владельца: состав, сумма, оплата, контакты и адрес."""
     try:
@@ -94,7 +116,7 @@ def order_card(r) -> str:
         items = {}
     lines = ", ".join(f"{p['name']} × {q}" for p, q, _ in logic.cart_lines(items)) or "—"
     if r["paid"]:
-        pay = "✅ оплачен онлайн"
+        pay = "💳 оплачен онлайн"
     elif config.PAYMENT_TOKEN:
         pay = "⏳ ждёт оплаты"
     else:
@@ -106,7 +128,7 @@ def order_card(r) -> str:
         cr = datetime.strptime(cr[:16], "%Y-%m-%d %H:%M").strftime("%d.%m %H:%M")
     except ValueError:
         pass
-    return (f"<b>#{r['id']}</b> · {cr} · {logic.money(r['goods'] + r['delivery'])} · {pay}\n"
+    return (f"{STATUS.get(r['status'], STATUS['new'])}\n<b>#{r['id']}</b> · {cr} · {logic.money(r['goods'] + r['delivery'])} · {pay}\n"
             f"{lines}\n{r['name']}, {r['phone']}\n{where}")
 
 
@@ -152,8 +174,24 @@ async def admin_cb(c: CallbackQuery, state: FSMContext):
         dt = datetime.strptime(d, "%Y-%m-%d")
         await send_long(c.message, f"<b>Записи на {WD[dt.weekday()]} {dt:%d.%m}:</b>\n" + ("\n".join(booking_line(r) for r in rows) or "нет"))
     elif a == "orders":
-        rows = db.recent("orders")
+        await c.message.answer("<b>Заказы</b>", reply_markup=orders_menu())
+    elif a == "o_active":
+        rows = db.orders_by("active")
+        if not rows:
+            await c.message.answer("Активных заказов нет 👌")
+        for r in rows:                                     # каждый отдельным сообщением — со своими кнопками
+            await c.message.answer(order_card(r), reply_markup=order_kb(r))
+    elif a == "o_done":
+        rows = db.orders_by("done", 10)
+        await send_long(c.message, "<b>Выполненные и отменённые:</b>\n\n" + ("\n\n".join(order_card(r) for r in rows) or "нет"))
+    elif a == "o_recent":
+        rows = db.orders_by("recent", 10)
         await send_long(c.message, "<b>Последние заказы:</b>\n\n" + ("\n\n".join(order_card(r) for r in rows) or "нет"))
+    elif a == "clear":
+        await c.message.answer("Что удалить?", reply_markup=kb([
+            [("🗑 Выполненные и отменённые заказы", "cl:finished")],
+            [("💣 Всё: заказы, записи, заявки", "cl:all")],
+            [("✖️ Ничего", "cl:no")]]))
     elif a == "leads":
         rows = db.recent("leads")
         await c.message.answer("Последние заявки:\n" + ("\n".join(f"#{r['id']} {r['name']}, {r['phone']} — {r['estimate']}" for r in rows) or "нет"))
@@ -164,6 +202,42 @@ async def admin_cb(c: CallbackQuery, state: FSMContext):
     elif a == "bcast":
         await state.set_state(Broadcast.text)
         await c.message.answer("Пришлите текст рассылки (или /cancel):")
+    await c.answer()
+
+
+@router.callback_query(F.data.startswith("os:"))
+async def order_status(c: CallbackQuery):
+    if not is_admin(c.from_user.id):
+        return await c.answer("Только для владельца", show_alert=True)
+    _, oid, st = c.data.split(":")
+    oid = int(oid)
+    if not db.set_order_status(oid, st):
+        return await c.answer("Заказ не найден (возможно, история очищена)", show_alert=True)
+    r = db.get_order(oid)
+    await c.message.edit_text(order_card(r), reply_markup=order_kb(r))
+    if st in CLIENT_MSG and r["user_id"]:
+        try:                                   # клиенту пишет клиентский бот
+            await (common.CLIENT_BOT or c.bot).send_message(r["user_id"], CLIENT_MSG[st].format(id=oid))
+        except Exception:
+            pass
+    await c.answer(STATUS[st])
+
+
+@router.callback_query(F.data.startswith("cl:"))
+async def clear_cb(c: CallbackQuery):
+    if not is_admin(c.from_user.id):
+        return await c.answer("Только для владельца", show_alert=True)
+    what = c.data[3:]
+    if what == "no":
+        await c.message.edit_text("Ничего не удалено.")
+    elif what in ("finished", "all") and not c.data.endswith("!"):
+        txt = ("Удалить все выполненные и отменённые заказы?" if what == "finished" else
+               "Стереть ВСЕ заказы, записи и заявки? Нумерация начнётся с #1. Список пользователей для рассылки останется.")
+        await c.message.edit_text(txt + "\nОтменить будет нельзя. Сначала можно сделать выгрузку в Excel.",
+                                  reply_markup=kb([[("Да, удалить", f"cl:{what}!"), ("✖️ Нет", "cl:no")]]))
+    else:
+        n = db.clear_history(what.rstrip("!"))
+        await c.message.edit_text(f"🧹 Готово, удалено строк: {n}.")
     await c.answer()
 
 

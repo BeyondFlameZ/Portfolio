@@ -69,7 +69,7 @@ def parse_phone(text: str | None) -> str | None:
     return None
 
 
-async def notify_owner(bot: Bot, text: str, user_chat: int | None = None):
+async def notify_owner(bot: Bot, text: str, user_chat: int | None = None, markup=None):
     """
     Уведомление владельцу бизнеса — в служебный бот, если он настроен, иначе в этот же.
     В демо-режиме клиент тоже видит, как это выглядит у владельца.
@@ -77,7 +77,7 @@ async def notify_owner(bot: Bot, text: str, user_chat: int | None = None):
     sender = ADMIN_BOT or bot
     for a in config.ADMIN_IDS:
         try:
-            await sender.send_message(a, text)
+            await sender.send_message(a, text, reply_markup=markup)
         except Exception as e:                      # владелец мог не запускать бота
             log.warning("не отправил админу %s: %s", a, e)
     if config.DEMO_MODE and user_chat is not None and user_chat not in config.ADMIN_IDS:
