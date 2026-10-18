@@ -321,6 +321,23 @@ class SplitHarness(Harness):
                 and (to is None or getattr(m, "chat_id", to) == to)]
 
 
+def test_admin_all_bookings_and_day_view():
+    x = h()
+    base = common.now_local().replace(hour=12, minute=0) + timedelta(days=2)
+    b1 = db.add_booking(111, "Анна", "+7900", "cut", "ivan", base, base + timedelta(minutes=60))
+    b2 = db.add_booking(111, "Борис", "+7901", "cut", "oleg", base + timedelta(days=3), base + timedelta(days=3, minutes=60))
+    n = len(x.session.sent); x.cb("a:all", user=ADMIN)
+    t = "\n".join(x.texts(n))
+    assert "Анна" in t and "Борис" in t and "Все предстоящие записи" in t, t
+    day = f"a:day:{base:%Y-%m-%d}"
+    assert day in x.buttons(n)
+    n = len(x.session.sent); x.cb(day, user=ADMIN)
+    t = "\n".join(x.texts(n))
+    assert "Анна" in t and "Борис" not in t, t
+    n = len(x.session.sent); x.cb("a:all")                        # не админ
+    assert "Только для владельца" in x.alerts(n)
+
+
 def test_split_admin_bot():
     x = SplitHarness()
     try:

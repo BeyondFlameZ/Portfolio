@@ -96,6 +96,12 @@ def bookings_on(day: str) -> list[sqlite3.Row]:
     return conn().execute("SELECT * FROM bookings WHERE status='active' AND start LIKE ? ORDER BY start", (day + "%",)).fetchall()
 
 
+def bookings_from(start_local: str, limit: int = 300) -> list[sqlite3.Row]:
+    """Все активные записи начиная с момента start_local ('YYYY-MM-DD HH:MM'), по времени."""
+    return conn().execute("SELECT * FROM bookings WHERE status='active' AND start>=? ORDER BY start LIMIT ?",
+                          (start_local, limit)).fetchall()
+
+
 def due_reminders(until_local: datetime, from_local: datetime) -> list[sqlite3.Row]:
     return conn().execute("SELECT * FROM bookings WHERE status='active' AND reminded=0 AND start<=? AND start>?",
                           (until_local.isoformat(sep=" ", timespec="minutes"), from_local.isoformat(sep=" ", timespec="minutes"))).fetchall()
