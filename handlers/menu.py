@@ -56,3 +56,14 @@ async def order_info(c: CallbackQuery):
     contact = f"Написать мне: {config.CONTACT}" if config.CONTACT else "Напишите мне на Kwork, обсудим задачу."
     await c.message.edit_text(ORDER.format(contact=contact), reply_markup=kb([[MENU_BTN]]))
     await c.answer()
+
+
+# Подключается в клиентского бота только в раздельном режиме (ADMIN_BOT_TOKEN задан).
+admin_hint_router = Router()
+
+
+@admin_hint_router.message(Command("admin"))
+async def admin_hint(m: Message):
+    if m.from_user.id in config.ADMIN_IDS:
+        return await m.answer("Админка и уведомления — в служебном боте владельца. Откройте его и нажмите /start.")
+    await m.answer("Админка доступна только владельцу.")

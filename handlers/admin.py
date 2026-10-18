@@ -11,6 +11,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 import config
 import db
 import logic
+from handlers import common
 from handlers.common import kb, now_local
 
 router = Router()
@@ -29,6 +30,24 @@ def admin_kb():
     return kb([[("📅 Записи на сегодня", "a:today"), ("🛒 Заказы", "a:orders")],
                [("🔥 Заявки", "a:leads"), ("📥 Выгрузка в Excel", "a:export")],
                [("📣 Рассылка", "a:bcast")]])
+
+
+# Служебный бот владельца (ADMIN_BOT_TOKEN): /start сразу открывает админку.
+admin_bot_router = Router()
+
+
+@admin_bot_router.message(Command("start"))
+async def admin_bot_start(m: Message, state: FSMContext):
+    if not is_admin(m.from_user.id):
+        return await m.answer("Это служебный бот владельца. Доступ закрыт.")
+    await m.answer("Сюда будут приходить новые записи, заказы и заявки.")
+    await admin(m, state)
+
+
+@admin_bot_router.message(Command("cancel"))
+async def admin_bot_cancel(m: Message, state: FSMContext):
+    await state.clear()
+    await m.answer("Отменено.")
 
 
 @router.message(Command("admin"))
@@ -94,9 +113,10 @@ async def bcast_go(c: CallbackQuery, state: FSMContext):
         return await c.answer()
     await c.message.edit_text("Рассылаю…")
     ok = fail = 0
+    sender = common.CLIENT_BOT or c.bot          # клиентам пишет клиентский бот, даже если кнопку нажали в служебном
     for uid in db.all_users():
         try:
-            await c.bot.send_message(uid, st["text"])
+            await sender.send_message(uid, st["text"])
             ok += 1
         except Exception:
             fail += 1

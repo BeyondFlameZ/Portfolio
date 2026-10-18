@@ -12,6 +12,11 @@ import config
 
 log = logging.getLogger("bot")
 
+# Если задан ADMIN_BOT_TOKEN, bot.py кладёт сюда оба бота:
+# CLIENT_BOT — бот для клиентов, ADMIN_BOT — служебный бот владельца (уведомления и админка).
+CLIENT_BOT: Bot | None = None
+ADMIN_BOT: Bot | None = None
+
 
 def now_local() -> datetime:
     """Текущее время заведения без tzinfo (всё в БД хранится в местном времени)."""
@@ -55,11 +60,16 @@ def parse_phone(text: str | None) -> str | None:
 
 
 async def notify_owner(bot: Bot, text: str, user_chat: int | None = None):
-    """Уведомление владельцу бизнеса. В демо-режиме клиент тоже видит, как это выглядит у владельца."""
+    """
+    Уведомление владельцу бизнеса — в служебный бот, если он настроен, иначе в этот же.
+    В демо-режиме клиент тоже видит, как это выглядит у владельца.
+    """
+    sender = ADMIN_BOT or bot
     for a in config.ADMIN_IDS:
         try:
-            await bot.send_message(a, text)
+            await sender.send_message(a, text)
         except Exception as e:                      # владелец мог не запускать бота
             log.warning("не отправил админу %s: %s", a, e)
     if config.DEMO_MODE and user_chat is not None and user_chat not in config.ADMIN_IDS:
-        await bot.send_message(user_chat, "👀 <b>Так это сообщение получит владелец бизнеса:</b>\n\n" + text)
+        where = " (в отдельный служебный бот)" if ADMIN_BOT else ""
+        await bot.send_message(user_chat, f"👀 <b>Так это сообщение получит владелец бизнеса{where}:</b>\n\n" + text)
